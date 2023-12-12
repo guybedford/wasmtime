@@ -75,6 +75,42 @@ async fn handle_request(request: IncomingRequest, response_out: ResponseOutparam
                 }
             }
         }
+        (Method::Get, Some("/a")) => {
+            let response = OutgoingResponse::new(Fields::new());
+            let mut body =
+                executor::outgoing_body(response.body().expect("response should be writable"));
+            ResponseOutparam::set(response_out, Ok(response));
+            body.send("’Twas brillig, and the slithy toves".as_bytes().to_vec())
+                .await
+                .expect("unable to send body");
+        }
+        (Method::Get, Some("/b")) => {
+            let response = OutgoingResponse::new(Fields::new());
+            let mut body =
+                executor::outgoing_body(response.body().expect("response should be writable"));
+            ResponseOutparam::set(response_out, Ok(response));
+            body.send("Did gyre and gimble in the wabe:".as_bytes().to_vec())
+                .await
+                .expect("unable to send body");
+        }
+        (Method::Get, Some("/c")) => {
+            let response = OutgoingResponse::new(Fields::new());
+            let mut body =
+                executor::outgoing_body(response.body().expect("response should be writable"));
+            ResponseOutparam::set(response_out, Ok(response));
+            body.send("All mimsy were the borogoves,".as_bytes().to_vec())
+                .await
+                .expect("unable to send body");
+        }
+        (Method::Get, Some("/d")) => {
+            let response = OutgoingResponse::new(Fields::new());
+            let mut body =
+                executor::outgoing_body(response.body().expect("response should be writable"));
+            ResponseOutparam::set(response_out, Ok(response));
+            body.send("And the mome raths outgrabe.".as_bytes().to_vec())
+                .await
+                .expect("unable to send body");
+        }
 
         (Method::Post, Some("/echo")) => {
             // Echo the request body without buffering it.
