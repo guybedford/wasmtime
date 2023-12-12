@@ -81,8 +81,15 @@ impl ServeCommand {
     pub fn execute(mut self) -> Result<()> {
         self.run.common.init_logging()?;
 
-        // We force cli errors before starting to listen for connections so then
-        // we don't accidentally delay them to the first request.
+        // We force cli errors before starting to listen for connections so that we don't
+        // accidentally delay them to the first request.
+        if self.run.common.wasi.nn == Some(true) {
+            #[cfg(not(feature = "wasi-nn"))]
+            {
+                bail!("Cannot enable wasi-nn when the binary is not compiled with this feature.");
+            }
+        }
+
         if let Some(Profile::Guest { .. }) = &self.run.profile {
             bail!("Cannot use the guest profiler with components");
         }
