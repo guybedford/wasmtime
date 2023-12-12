@@ -69,6 +69,7 @@ fn build_and_generate_tests() {
         // a `foreach_*` macro below.
         let kind = match target.as_str() {
             s if s.starts_with("http_") => "http",
+            s if s.starts_with("proxy_") => "proxy",
             s if s.starts_with("preview1_") => "preview1",
             s if s.starts_with("preview2_") => "preview2",
             s if s.starts_with("cli_") => "cli",
