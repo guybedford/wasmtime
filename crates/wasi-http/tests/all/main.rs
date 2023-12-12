@@ -11,6 +11,7 @@ use wasmtime::{
     component::{Component, Linker, ResourceTable},
     Config, Engine, Store,
 };
+use wasmtime_wasi::bindings::Command;
 use wasmtime_wasi::{self, pipe::MemoryOutputPipe, IoView, WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::{
     bindings::http::types::{ErrorCode, Scheme},
@@ -406,9 +407,68 @@ async fn wasi_http_hash_all_with_reject() -> Result<()> {
     Ok(())
 }
 
+async fn run(path: &str) -> Result<()> {
+    let mut config = Config::new();
+    config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
+    config.wasm_component_model(true);
+    config.async_support(true);
+    let engine = Engine::new(&config)?;
+    let component = Component::from_file(&engine, path)?;
+    let server1 = {
+        let engine = engine.clone();
+        let component = Component::from_file(
+            &engine,
+            test_programs_artifacts::API_PROXY_STREAMING_COMPONENT,
+        )?;
+        Server::new_from_component(engine, component).await?
+    };
+    let server2 = {
+        let engine = engine.clone();
+        let component = Component::from_file(
+            &engine,
+            test_programs_artifacts::API_PROXY_STREAMING_COMPONENT,
+        )?;
+        Server::new_from_component(engine, component).await?
+    };
+
+    let stdout = MemoryOutputPipe::new(4096);
+    let stderr = MemoryOutputPipe::new(4096);
+
+    // Create our wasi context.
+    let mut builder = WasiCtxBuilder::new();
+    builder.stdout(stdout.clone());
+    builder.stderr(stderr.clone());
+    builder.env("HANDLER_API_PROXY_STREAMING1", server1.addr().to_string());
+    builder.env("HANDLER_API_PROXY_STREAMING2", server2.addr().to_string());
+
+    let ctx = Ctx {
+        table: ResourceTable::new(),
+        wasi: builder.build(),
+        http: WasiHttpCtx::new(),
+        stderr,
+        stdout,
+        send_request: None,
+        rejected_authority: None,
+    };
+
+    let mut store = Store::new(&engine, ctx);
+
+    let mut linker = Linker::new(&engine);
+    wasmtime_wasi::bindings::Command::add_to_linker(&mut linker, |t| t)?;
+    wasmtime_wasi_http::proxy::add_only_http_to_linker(&mut linker)?;
+    let (command, _instance) = Command::instantiate_async(&mut store, &component, &linker).await?;
+    let result = command.wasi_cli_run().call_run(&mut store).await?;
+    result.map_err(|()| anyhow::anyhow!("run returned an error"))
+}
+
 #[test_log::test(tokio::test)]
 async fn wasi_http_echo() -> Result<()> {
-    do_wasi_http_echo("echo", None).await
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run(test_programs_artifacts::PROXY_ECHO_COMPONENT),
+    )
+    .await??;
+    Ok(())
 }
 
 #[test_log::test(tokio::test)]
