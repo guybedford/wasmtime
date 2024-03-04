@@ -6,11 +6,13 @@ use http_body_util::{combinators::BoxBody, Collected, Empty, StreamBody};
 use hyper::{body::Bytes, server::conn::http1, service::service_fn, Method, StatusCode};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, iter, net::Ipv4Addr, str, sync::Arc};
+use test_programs_artifacts::{API_PROXY, PROXY_ECHO};
 use tokio::task;
 use wasmtime::{
     component::{Component, Linker, Resource, ResourceTable},
     Config, Engine, Store,
 };
+use wasmtime_wasi::preview2::command::Command;
 use wasmtime_wasi::preview2::{self, pipe::MemoryOutputPipe, WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::{
     bindings::http::types::ErrorCode,
@@ -361,9 +363,30 @@ async fn do_wasi_http_hash_all(override_send_request: bool) -> Result<()> {
     Ok(())
 }
 
+async fn run(path: &str) -> Result<()> {
+    let mut config = Config::new();
+    config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
+    config.wasm_component_model(true);
+    config.async_support(true);
+    let engine = Engine::new(&config)?;
+    let component = Component::from_file(&engine, path)?;
+    let server = {
+        let engine = engine.clone();
+        let component = Component::from_file(&engine, API_PROXY)?;
+        Server::new_from_component(engine, component).await?
+    };
+    let mut store = store(&engine, &server);
+    let mut linker = Linker::new(&engine);
+    wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
+    wasmtime_wasi_http::proxy::add_only_http_to_linker(&mut linker)?;
+    let (command, _instance) = Command::instantiate_async(&mut store, &component, &linker).await?;
+    let result = command.wasi_cli_run().call_run(&mut store).await?;
+    result.map_err(|()| anyhow::anyhow!("run returned an error"))
+}
+
 #[test_log::test(tokio::test)]
 async fn wasi_http_echo() -> Result<()> {
-    do_wasi_http_echo("echo", None).await
+    run(PROXY_ECHO).await
 }
 
 #[test_log::test(tokio::test)]
