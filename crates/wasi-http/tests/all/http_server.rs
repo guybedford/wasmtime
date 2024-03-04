@@ -1,13 +1,26 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{body::Bytes, service::service_fn, Request, Response};
 use std::{
     future::Future,
     net::{SocketAddr, TcpStream},
+    sync::Arc,
     thread::JoinHandle,
 };
 use tokio::net::TcpListener;
-use wasmtime_wasi_http::io::TokioIo;
+use wasmtime::{
+    component::{Component, Linker, ResourceTable},
+    Engine, InstancePre, Store,
+};
+use wasmtime_wasi::preview2::{pipe::MemoryOutputPipe, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi_http::{
+    bindings::http::types,
+    body::{HyperIncomingBody, HyperOutgoingBody},
+    hyper_response_error,
+};
+use wasmtime_wasi_http::{io::TokioIo, proxy::Proxy, WasiHttpCtx, WasiHttpView};
+
+use crate::Ctx;
 
 async fn test(
     mut req: Request<hyper::body::Incoming>,
@@ -61,6 +74,76 @@ impl Server {
         Ok(Self {
             worker: Some(worker),
             addr,
+        })
+    }
+
+    pub async fn new_from_component(engine: Engine, component: Component) -> Result<Self> {
+        tracing::debug!("initializing incoming handler server component");
+
+        let mut linker: Linker<Ctx> = Linker::new(&engine);
+        wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
+        wasmtime_wasi_http::proxy::add_only_http_to_linker(&mut linker)?;
+
+        let instance_pre = linker.instantiate_pre(&component)?;
+
+        Self::new(|io| async move {
+            let mut builder = hyper::server::conn::http1::Builder::new();
+            let http = builder.keep_alive(false).pipeline_flush(true);
+
+            tracing::debug!("preparing to bind connection to service");
+            let conn = http
+                .serve_connection(
+                    io,
+                    service_fn(move |req: Request<hyper::body::Incoming>| async {
+                        let (sender, receiver) = tokio::sync::oneshot::channel();
+                        let engine = engine.clone();
+                        let instance_pre = instance_pre.clone();
+
+                        tokio::task::spawn(async move {
+                            let stdout = MemoryOutputPipe::new(4096);
+                            let stderr = MemoryOutputPipe::new(4096);
+
+                            // Create our wasi context.
+                            let mut builder = WasiCtxBuilder::new();
+                            builder.stdout(stdout.clone());
+                            builder.stderr(stderr.clone());
+
+                            let ctx = Ctx {
+                                table: ResourceTable::new(),
+                                wasi: builder.build(),
+                                http: WasiHttpCtx {},
+                                stderr,
+                                stdout,
+                                send_request: None,
+                            };
+                            let mut store = Store::new(&engine, ctx);
+                            let (parts, body) = req.into_parts();
+                            let req = Request::from_parts(
+                                parts,
+                                body.map_err(hyper_response_error).boxed(),
+                            );
+                            let req = store.data_mut().new_incoming_request(req)?;
+                            let out = store.data_mut().new_response_outparam(sender)?;
+                            // let (proxy, _) =
+                            // Proxy::instantiate_pre(&mut store, &instance_pre).await?;
+                            // proxy
+                            // .wasi_http_incoming_handler()
+                            // .call_handle(store, req, out)
+                            // .await
+                            Ok::<_, anyhow::Error>(())
+                        });
+
+                        match receiver.await {
+                            Ok(Ok(res)) => Ok(res),
+                            Ok(Err(e)) => Err(anyhow::anyhow!(e)),
+                            Err(e) => panic!("server exited without writing response: {}", e),
+                        }
+                    }),
+                )
+                .await;
+            tracing::trace!("connection result {:?}", conn);
+            conn?;
+            Ok(())
         })
     }
 
