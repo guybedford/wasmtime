@@ -130,6 +130,8 @@ fn do_wasi_http_echo(server: &str, path: &str, url_header: Option<&str>) {
     }
     OutgoingBody::finish(outgoing_body, None).unwrap();
 
+    drop(outgoing_body_stream);
+
     loop {
         input_stream.subscribe().block();
         let read_result = input_stream.read(1024 * 1024);
