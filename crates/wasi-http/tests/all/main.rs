@@ -6,7 +6,6 @@ use http_body_util::{combinators::BoxBody, BodyExt, Collected, Empty, StreamBody
 use hyper::{body::Bytes, server::conn::http1, service::service_fn, Method, StatusCode};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, iter, net::Ipv4Addr, str, sync::Arc};
-use test_programs_artifacts::{API_PROXY, PROXY_ECHO};
 use tokio::task;
 use wasmtime::{
     component::{Component, Linker, ResourceTable},
@@ -418,12 +417,40 @@ async fn run(path: &str) -> Result<()> {
     config.async_support(true);
     let engine = Engine::new(&config)?;
     let component = Component::from_file(&engine, path)?;
-    let server = {
+    let server1 = {
         let engine = engine.clone();
-        let component = Component::from_file(&engine, API_PROXY)?;
+        let component =
+            Component::from_file(&engine, test_programs_artifacts::API_PROXY_STREAMING_COMPONENT)?;
         Server::new_from_component(engine, component).await?
     };
-    let mut store = store(&engine, &server);
+    let server2 = {
+        let engine = engine.clone();
+        let component =
+            Component::from_file(&engine, test_programs_artifacts::API_PROXY_STREAMING_COMPONENT)?;
+        Server::new_from_component(engine, component).await?
+    };
+
+    let stdout = MemoryOutputPipe::new(4096);
+    let stderr = MemoryOutputPipe::new(4096);
+
+    // Create our wasi context.
+    let mut builder = WasiCtxBuilder::new();
+    builder.stdout(stdout.clone());
+    builder.stderr(stderr.clone());
+    builder.env("HANDLER_API_PROXY_STREAMING1", server1.addr().to_string());
+    builder.env("HANDLER_API_PROXY_STREAMING2", server2.addr().to_string());
+
+    let ctx = Ctx {
+        table: ResourceTable::new(),
+        wasi: builder.build(),
+        http: WasiHttpCtx {},
+        stderr,
+        stdout,
+        send_request: None,
+    };
+
+    let mut store = Store::new(&engine, ctx);
+
     let mut linker = Linker::new(&engine);
     wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
     wasmtime_wasi_http::proxy::add_only_http_to_linker(&mut linker)?;
@@ -434,7 +461,7 @@ async fn run(path: &str) -> Result<()> {
 
 #[test_log::test(tokio::test)]
 async fn wasi_http_echo() -> Result<()> {
-    run(PROXY_ECHO).await
+    run(test_programs_artifacts::PROXY_ECHO_COMPONENT).await
 }
 
 #[test_log::test(tokio::test)]
