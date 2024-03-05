@@ -31,9 +31,11 @@ fn main() {
     };
 
     let outgoing_body = request.body().unwrap();
-    // _ = outgoing_body.write().unwrap();
+    let outgoing_body_stream = outgoing_body.write().unwrap();
 
     OutgoingBody::finish(outgoing_body, None).unwrap();
+
+    drop(outgoing_body_stream);
 
     let future_response = outgoing_handler::handle(request, None).unwrap();
 
