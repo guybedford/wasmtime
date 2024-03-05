@@ -128,6 +128,9 @@ fn do_wasi_http_echo(server: &str, path: &str, url_header: Option<&str>) {
         }
         outgoing_body_stream.subscribe().block();
     }
+
+    drop(outgoing_body_stream);
+
     OutgoingBody::finish(outgoing_body, None).unwrap();
 
     loop {

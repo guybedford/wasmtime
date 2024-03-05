@@ -371,14 +371,18 @@ async fn run(path: &str) -> Result<()> {
     let component = Component::from_file(&engine, path)?;
     let server1 = {
         let engine = engine.clone();
-        let component =
-            Component::from_file(&engine, test_programs_artifacts::API_PROXY_STREAMING_COMPONENT)?;
+        let component = Component::from_file(
+            &engine,
+            test_programs_artifacts::API_PROXY_STREAMING_COMPONENT,
+        )?;
         Server::new_from_component(engine, component).await?
     };
     let server2 = {
         let engine = engine.clone();
-        let component =
-            Component::from_file(&engine, test_programs_artifacts::API_PROXY_STREAMING_COMPONENT)?;
+        let component = Component::from_file(
+            &engine,
+            test_programs_artifacts::API_PROXY_STREAMING_COMPONENT,
+        )?;
         Server::new_from_component(engine, component).await?
     };
 
@@ -413,7 +417,12 @@ async fn run(path: &str) -> Result<()> {
 
 #[test_log::test(tokio::test)]
 async fn wasi_http_echo() -> Result<()> {
-    run(test_programs_artifacts::PROXY_ECHO_COMPONENT).await
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run(test_programs_artifacts::PROXY_ECHO_COMPONENT),
+    )
+    .await?;
+    Ok(())
 }
 
 #[test_log::test(tokio::test)]
