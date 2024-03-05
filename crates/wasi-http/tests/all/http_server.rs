@@ -11,9 +11,11 @@ use wasmtime::{
     component::{Component, InstancePre, Linker, ResourceTable},
     Engine, Store,
 };
-use wasmtime_wasi::preview2::{pipe::MemoryOutputPipe, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::preview2::{pipe::MemoryOutputPipe, WasiCtxBuilder};
+use wasmtime_wasi_http::{
+    bindings::http::types as http_types, io::TokioIo, proxy::Proxy, WasiHttpCtx, WasiHttpView,
+};
 use wasmtime_wasi_http::{body::HyperOutgoingBody, hyper_response_error};
-use wasmtime_wasi_http::{io::TokioIo, proxy::Proxy, WasiHttpCtx, WasiHttpView};
 
 use crate::Ctx;
 
@@ -199,7 +201,36 @@ async fn handle_request(
             send_request: None,
         };
         let mut store = Store::new(&engine, ctx);
-        let (parts, body) = req.into_parts();
+        let (mut parts, body) = req.into_parts();
+
+        parts.uri = {
+            let uri_parts = parts.uri.into_parts();
+
+            let scheme = uri_parts.scheme.unwrap_or(http::uri::Scheme::HTTP);
+
+            let host = if let Some(val) = parts.headers.get(hyper::header::HOST) {
+                std::str::from_utf8(val.as_bytes())
+                    .map_err(|_| http_types::ErrorCode::HttpRequestUriInvalid)?
+            } else {
+                uri_parts
+                    .authority
+                    .as_ref()
+                    .ok_or(http_types::ErrorCode::HttpRequestUriInvalid)?
+                    .host()
+            };
+
+            let path_with_query = uri_parts
+                .path_and_query
+                .ok_or(http_types::ErrorCode::HttpRequestUriInvalid)?;
+
+            hyper::Uri::builder()
+                .scheme(scheme)
+                .authority(host)
+                .path_and_query(path_with_query)
+                .build()
+                .map_err(|_| http_types::ErrorCode::HttpRequestUriInvalid)?
+        };
+
         let req = Request::from_parts(parts, body.map_err(hyper_response_error).boxed());
         let req = store.data_mut().new_incoming_request(req)?;
         let out = store.data_mut().new_response_outparam(sender)?;
@@ -211,8 +242,14 @@ async fn handle_request(
     });
 
     match receiver.await {
-        Ok(Ok(res)) => Ok(res),
-        Ok(Err(e)) => Err(e.into()),
+        Ok(Ok(res)) => {
+            eprintln!("server returned response");
+            Ok(res)
+        }
+        Ok(Err(e)) => {
+            eprintln!("server returned response");
+            Err(e.into())
+        }
         Err(e) => panic!("server exited without writing response: {}", e),
     }
 }
