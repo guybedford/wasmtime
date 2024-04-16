@@ -11,9 +11,8 @@ use wasmtime::{
     component::{Component, Linker, ResourceTable},
     Config, Engine, Store,
 };
-use wasmtime_wasi::{self, pipe::MemoryOutputPipe, WasiCtx, WasiCtxBuilder, WasiView};
-use wasmtime_wasi::preview2::command::Command;
-use wasmtime_wasi::preview2::{self, pipe::MemoryOutputPipe, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::bindings::Command;
+use wasmtime_wasi::{pipe::MemoryOutputPipe, WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::{
     bindings::http::types::{ErrorCode, Scheme},
     body::HyperOutgoingBody,
@@ -447,16 +446,17 @@ async fn run(path: &str) -> Result<()> {
     let ctx = Ctx {
         table: ResourceTable::new(),
         wasi: builder.build(),
-        http: WasiHttpCtx {},
+        http: WasiHttpCtx::new(),
         stderr,
         stdout,
         send_request: None,
+        rejected_authority: None,
     };
 
     let mut store = Store::new(&engine, ctx);
 
     let mut linker = Linker::new(&engine);
-    wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
+    wasmtime_wasi::bindings::Command::add_to_linker(&mut linker, |t| t)?;
     wasmtime_wasi_http::proxy::add_only_http_to_linker(&mut linker)?;
     let (command, _instance) = Command::instantiate_async(&mut store, &component, &linker).await?;
     let result = command.wasi_cli_run().call_run(&mut store).await?;
@@ -469,7 +469,7 @@ async fn wasi_http_echo() -> Result<()> {
         std::time::Duration::from_secs(30),
         run(test_programs_artifacts::PROXY_ECHO_COMPONENT),
     )
-    .await?;
+    .await??;
     Ok(())
 }
 
