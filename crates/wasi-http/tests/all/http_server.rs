@@ -11,7 +11,7 @@ use wasmtime::{
     component::{Component, InstancePre, Linker, ResourceTable},
     Engine, Store,
 };
-use wasmtime_wasi::preview2::{pipe::MemoryOutputPipe, WasiCtxBuilder};
+use wasmtime_wasi::{pipe::MemoryOutputPipe, WasiCtxBuilder};
 use wasmtime_wasi_http::{
     bindings::http::types as http_types, io::TokioIo, proxy::Proxy, WasiHttpCtx, WasiHttpView,
 };
@@ -78,7 +78,7 @@ impl Server {
         tracing::debug!("initializing incoming handler server component");
 
         let mut linker: Linker<Ctx> = Linker::new(&engine);
-        wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
+        wasmtime_wasi::bindings::Command::add_to_linker(&mut linker, |t| t)?;
         wasmtime_wasi_http::proxy::add_only_http_to_linker(&mut linker)?;
 
         let instance_pre = linker.instantiate_pre(&component)?;
@@ -195,10 +195,11 @@ async fn handle_request(
         let ctx = Ctx {
             table: ResourceTable::new(),
             wasi: builder.build(),
-            http: WasiHttpCtx {},
+            http: WasiHttpCtx::new(),
             stderr,
             stdout,
             send_request: None,
+            rejected_authority: None,
         };
         let mut store = Store::new(&engine, ctx);
         let (mut parts, body) = req.into_parts();
