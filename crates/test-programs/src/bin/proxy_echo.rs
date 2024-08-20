@@ -1,6 +1,7 @@
 wit_bindgen::generate!({
-  path: "../wasi-http/wit",
-  world: "test-command"
+    generate_all,
+    path: "../wasi-http/wit",
+    world: "test-command"
 });
 
 use std::iter;
