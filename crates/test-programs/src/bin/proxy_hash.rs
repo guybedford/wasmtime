@@ -10,6 +10,7 @@ use crate::wasi::{
 };
 
 wit_bindgen::generate!({
+    generate_all,
     path: "../wasi-http/wit",
     world: "test-command",
 });
