@@ -1,7 +1,7 @@
 wit_bindgen::generate!({
     generate_all,
     path: "../wasi-http/wit",
-    world: "bindings"
+    world: "test-command"
 });
 
 use std::iter;
