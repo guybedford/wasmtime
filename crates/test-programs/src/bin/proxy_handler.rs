@@ -9,7 +9,7 @@ use crate::{
 wit_bindgen::generate!({
     generate_all,
     path: "../wasi-http/wit",
-    world: "test-command",
+    world: "bindings",
 });
 
 fn main() {
